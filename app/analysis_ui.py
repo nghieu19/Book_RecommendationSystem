@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -34,41 +33,29 @@ def render_analysis(items: pd.DataFrame):
     df["month"] = df["pseudo_time"].dt.to_period("M").astype(str)
 
     # ===============================
-    # DASHBOARD SETTINGS (CHỈ TRONG DATA ANALYSIS)
+    # DASHBOARD SETTINGS
     # ===============================
     with st.expander("⚙️ Dashboard Settings", expanded=True):
-        k_top = st.slider(
-            "Top N (Top items / genres)",
-            min_value=5,
-            max_value=30,
-            value=10
-        )
-
-        bins = st.slider(
-            "Bins (Histogram)",
-            min_value=10,
-            max_value=60,
-            value=20
-        )
-
+        k_top = st.slider("Top N (items / genres)", 5, 30, 10)
+        bins = st.slider("Bins (Histogram)", 10, 60, 20)
         sample_n = st.slider(
             "Sample cho scatter / network",
-            min_value=200,
-            max_value=min(2000, len(df)),
-            value=800
+            200,
+            min(2000, len(df)),
+            800
         )
 
     st.info(
-        "📌 Dataset không có cột thời gian → biểu đồ Line/Area sử dụng *pseudo_time* "
-        "(mốc giả dựa trên thứ tự item)."
+        "📌 Dataset không có cột thời gian → biểu đồ Line/Area "
+        "sử dụng *pseudo_time* (mốc giả theo thứ tự item)."
     )
 
     # ===============================
-    # 1️⃣ HISTOGRAM / BOXPLOT / VIOLIN
+    # 1️⃣ PHÂN BỐ RATING
     # ===============================
     st.subheader("1️⃣ Phân bố Rating (Histogram / Boxplot / Violin)")
 
-    c1, c2, c3 = st.columns(3, gap="large")
+    c1, c2, c3 = st.columns(3)
 
     with c1:
         fig_hist = px.histogram(
@@ -101,45 +88,103 @@ def render_analysis(items: pd.DataFrame):
     st.divider()
 
     # ===============================
-    # 2️⃣ LINE / AREA (PSEUDO TIME)
+    # 2️⃣ TẦN SUẤT NHÓM SẢN PHẨM
     # ===============================
-    st.subheader("2️⃣ Line / Area theo thời gian (Pseudo time)")
+    st.subheader("2️⃣ Tần suất nhóm sản phẩm (Genres)")
 
-    agg_time = (
-        df.dropna(subset=["rating"])
-        .groupby("month", as_index=False)
-        .agg(
-            avg_rating=("rating", "mean"),
-            count=("rating", "size")
-        )
+    genre_tokens = (
+        df["genres"]
+        .str.lower()
+        .str.split()
+        .explode()
+        .dropna()
     )
 
-    c1, c2 = st.columns(2, gap="large")
+    genre_freq = (
+        genre_tokens.value_counts()
+        .head(k_top)
+        .reset_index()
+    )
+    genre_freq.columns = ["genre", "count"]
 
-    with c1:
-        fig_line = px.line(
-            agg_time,
-            x="month",
-            y="avg_rating",
-            title="Line: Average Rating theo tháng (pseudo)"
-        )
-        st.plotly_chart(fig_line, use_container_width=True)
-
-    with c2:
-        fig_area = px.area(
-            agg_time,
-            x="month",
-            y="count",
-            title="Area: Số lượng sách theo tháng (pseudo)"
-        )
-        st.plotly_chart(fig_area, use_container_width=True)
+    fig_genre_bar = px.bar(
+        genre_freq,
+        x="genre",
+        y="count",
+        text="count",
+        title=f"Top {k_top} thể loại phổ biến nhất"
+    )
+    st.plotly_chart(fig_genre_bar, use_container_width=True)
 
     st.divider()
 
     # ===============================
-    # 3️⃣ SCATTER + REGRESSION
+    # 3️⃣ TOP ITEMS – PHỔ BIẾN NHẤT
     # ===============================
-    st.subheader("3️⃣ Scatter + Hồi quy: Rating vs Popularity")
+    st.subheader("3️⃣ Top Items – Sách phổ biến nhất")
+
+    top_popular = (
+        df.dropna(subset=["ratings_count"])
+        .sort_values("ratings_count", ascending=False)
+        .head(k_top)
+    )
+
+    fig_top_pop = px.bar(
+        top_popular,
+        x="ratings_count",
+        y="title",
+        orientation="h",
+        text="ratings_count",
+        title=f"Top {k_top} sách có nhiều lượt đánh giá nhất"
+    )
+    fig_top_pop.update_layout(yaxis=dict(autorange="reversed"))
+    st.plotly_chart(fig_top_pop, use_container_width=True)
+
+    with st.expander("📄 Bảng chi tiết"):
+        st.dataframe(
+            top_popular[["title", "author", "ratings_count", "rating"]],
+            use_container_width=True
+        )
+
+    st.divider()
+
+    # ===============================
+    # 4️⃣ TOP ITEMS – RATING CAO
+    # ===============================
+    st.subheader("4️⃣ Top Items – Sách có rating cao nhất")
+
+    min_votes = st.slider(
+        "Số lượt đánh giá tối thiểu",
+        10, 500, 50, step=10
+    )
+
+    top_rated = (
+        df.dropna(subset=["rating", "ratings_count"])
+        .query("ratings_count >= @min_votes")
+        .sort_values("rating", ascending=False)
+        .head(k_top)
+    )
+
+    fig_top_rating = px.bar(
+        top_rated,
+        x="rating",
+        y="title",
+        orientation="h",
+        text="rating",
+        title=f"Top {k_top} sách rating cao nhất (≥ {min_votes} votes)"
+    )
+    fig_top_rating.update_layout(
+        yaxis=dict(autorange="reversed"),
+        xaxis=dict(range=[0, 5])
+    )
+    st.plotly_chart(fig_top_rating, use_container_width=True)
+
+    st.divider()
+
+    # ===============================
+    # 5️⃣ SCATTER + HỒI QUY
+    # ===============================
+    st.subheader("5️⃣ Scatter + Hồi quy: Rating vs Popularity")
 
     scatter_df = df.dropna(subset=["rating", "ratings_count"]).sample(
         min(sample_n, len(df.dropna(subset=["rating", "ratings_count"]))),
@@ -155,121 +200,54 @@ def render_analysis(items: pd.DataFrame):
 
     fig_scatter = go.Figure()
     fig_scatter.add_trace(go.Scatter(
-        x=x,
-        y=y,
-        mode="markers",
+        x=x, y=y, mode="markers",
         text=scatter_df["title"],
-        name="Books",
-        hovertemplate="log1p(ratings_count)=%{x:.2f}<br>rating=%{y:.2f}<br>%{text}<extra></extra>"
+        name="Books"
     ))
     fig_scatter.add_trace(go.Scatter(
-        x=x_line,
-        y=y_line,
-        mode="lines",
-        name="Regression line"
+        x=x_line, y=y_line, mode="lines",
+        name="Regression"
     ))
-
-    fig_scatter.update_layout(
-        title="Scatter: Rating vs log(1 + ratings_count)",
-        xaxis_title="log(1 + ratings_count)",
-        yaxis_title="Rating"
-    )
-
     st.plotly_chart(fig_scatter, use_container_width=True)
 
     st.divider()
 
     # ===============================
-    # 4️⃣ CORRELATION HEATMAP
+    # 6️⃣ HEATMAP TƯƠNG QUAN
     # ===============================
-    st.subheader("4️⃣ Heatmap tương quan")
+    st.subheader("6️⃣ Heatmap tương quan")
 
     corr = df[["rating", "ratings_count"]].dropna().corr()
-    fig_corr = px.imshow(
-        corr,
-        text_auto=True,
-        title="Correlation Heatmap"
-    )
+    fig_corr = px.imshow(corr, text_auto=True)
     st.plotly_chart(fig_corr, use_container_width=True)
 
     st.divider()
 
     # ===============================
-    # 5️⃣ TREEMAP / SUNBURST
+    # 7️⃣ WORDCLOUD
     # ===============================
-    st.subheader("5️⃣ Treemap / Sunburst (Genre → Author)")
+    st.subheader("7️⃣ WordCloud từ nội dung sách")
 
-    tmp = df.copy()
-    tmp["main_genre"] = tmp["genres"].str.lower().str.split().str[0].fillna("unknown")
-    tmp["main_genre"] = tmp["main_genre"].replace("", "unknown")
+    text_all = " ".join(df["text"].dropna())
+    wc = WordCloud(width=900, height=400, background_color="white").generate(text_all)
 
-    ga = (
-        tmp.groupby(["main_genre", "author"], as_index=False)
-        .agg(count=("title", "size"))
-        .sort_values("count", ascending=False)
-    )
-
-    ga_top = ga.groupby("main_genre").head(k_top)
-
-    c1, c2 = st.columns(2, gap="large")
-
-    with c1:
-        fig_tree = px.treemap(
-            ga_top,
-            path=["main_genre", "author"],
-            values="count",
-            title="Treemap: Genre → Author"
-        )
-        st.plotly_chart(fig_tree, use_container_width=True)
-
-    with c2:
-        fig_sun = px.sunburst(
-            ga_top,
-            path=["main_genre", "author"],
-            values="count",
-            title="Sunburst: Genre → Author"
-        )
-        st.plotly_chart(fig_sun, use_container_width=True)
+    fig_wc, ax_wc = plt.subplots(figsize=(10, 4))
+    ax_wc.imshow(wc, interpolation="bilinear")
+    ax_wc.axis("off")
+    st.pyplot(fig_wc)
 
     st.divider()
 
     # ===============================
-    # 6️⃣ WORDCLOUD
+    # 8️⃣ NETWORK GRAPH
     # ===============================
-    st.subheader("6️⃣ WordCloud từ nội dung sách")
+    st.subheader("8️⃣ Network graph: Co-occurrence giữa genre")
 
-    text_all = " ".join(df["text"].dropna().astype(str).tolist())
-
-    if len(text_all.strip()) < 50:
-        st.warning("Không đủ dữ liệu để tạo WordCloud.")
-    else:
-        wc = WordCloud(
-            width=900,
-            height=400,
-            background_color="white"
-        ).generate(text_all)
-
-        fig_wc, ax_wc = plt.subplots(figsize=(10, 4))
-        ax_wc.imshow(wc, interpolation="bilinear")
-        ax_wc.axis("off")
-        st.pyplot(fig_wc)
-
-    st.divider()
-
-    # ===============================
-    # 7️⃣ NETWORK GRAPH (GENRE CO-OCCURRENCE)
-    # ===============================
-    st.subheader("7️⃣ Network graph: Co-occurrence giữa genre")
-
-    genre_tokens = df["genres"].str.lower().str.split().explode().dropna()
     top_tokens = genre_tokens.value_counts().head(k_top).index.tolist()
-
     G = nx.Graph()
     G.add_nodes_from(top_tokens)
 
-    sample_items = df["genres"].str.lower().str.split().dropna().head(sample_n)
-
-    for toks in sample_items:
+    for toks in df["genres"].str.lower().str.split().dropna().head(sample_n):
         toks = [t for t in toks if t in top_tokens]
         for i in range(len(toks)):
             for j in range(i + 1, len(toks)):
@@ -278,23 +256,9 @@ def render_analysis(items: pd.DataFrame):
                 else:
                     G.add_edge(toks[i], toks[j], weight=1)
 
-    pos = nx.spring_layout(G, seed=42, k=0.7)
-    weights = [G[u][v]["weight"] for u, v in G.edges()] if G.edges() else []
-
+    pos = nx.spring_layout(G, seed=42)
     fig_net, ax_net = plt.subplots(figsize=(10, 6))
-    nx.draw_networkx_nodes(G, pos, ax=ax_net, node_size=700)
-    nx.draw_networkx_labels(G, pos, ax=ax_net, font_size=10)
-
-    if G.edges():
-        nx.draw_networkx_edges(
-            G,
-            pos,
-            ax=ax_net,
-            width=[0.3 + w * 0.1 for w in weights],
-            alpha=0.6
-        )
-
+    nx.draw_networkx(G, pos, ax=ax_net)
     ax_net.axis("off")
     st.pyplot(fig_net)
-
-    st.caption("Network graph biểu diễn các genre token thường xuất hiện cùng nhau.")
+ZƯ
